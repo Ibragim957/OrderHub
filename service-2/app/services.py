@@ -6,9 +6,6 @@
 не только из роутов, но и из обработчиков событий RabbitMQ или из тестов.
 """
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.models import Courier, CourierStatus, MenuItem, Restaurant
 from app.schemas import (
     CourierCreate,
@@ -18,7 +15,8 @@ from app.schemas import (
     RestaurantCreate,
     RestaurantUpdate,
 )
-
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # ------------------ Рестораны --------------------------
 

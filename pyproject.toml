@@ -1,8 +1,10 @@
 # Конфигурация ruff — линтера, который гоняется в CI.
 [tool.ruff]
-line-length = 100
+line-length = 120
 target-version = "py313"
-exclude = ["alembic/versions"]
+# Файлы миграций генерирует Alembic — переформатировать их вручную бессмысленно,
+# при следующей автогенерации всё вернётся обратно.
+exclude = ["**/alembic/versions/**"]
 
 [tool.ruff.lint]
 select = [
@@ -16,4 +18,8 @@ ignore = [
     # FastAPI-идиома: Depends(...) в значении по умолчанию — так работает
     # внедрение зависимостей, bugbear ругается на это ошибочно.
     "B008",
+    # class X(str, Enum) вместо StrEnum — осознанный выбор: именно эту форму
+    # используют примеры SQLAlchemy и Pydantic, и значения уже записаны
+    # в тип PostgreSQL. Переход на StrEnum меняет поведение str() и format().
+    "UP042",
 ]

@@ -1,9 +1,8 @@
-from app.models import UserRole, OrderStatus
-
-from pydantic import BaseModel, ConfigDict, Field
-from decimal import Decimal
 from datetime import datetime
+from decimal import Decimal
 
+from app.models import OrderStatus, UserRole
+from pydantic import BaseModel, ConfigDict, Field
 
 # ------------------Пользователь--------------------------
 

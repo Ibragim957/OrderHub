@@ -4,9 +4,6 @@
 только то, что относится к вебу: какой URL, какой код вернуть, кто имеет доступ.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app import services
 from app.database import get_db
 from app.deps import CurrentUser, UserRole, get_current_user, require_admin
@@ -27,6 +24,8 @@ from app.schemas import (
     RestaurantRead,
     RestaurantUpdate,
 )
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
 
