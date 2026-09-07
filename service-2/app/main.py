@@ -5,12 +5,16 @@
 и через события RabbitMQ.
 """
 
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
 from app.database import engine
+from app.metrics import setup_metrics
 from app.routes import router
+
+INSTANCE_NAME = os.getenv("INSTANCE_NAME", "service-2-local")
 
 
 @asynccontextmanager
@@ -30,6 +34,7 @@ app = FastAPI(
 )
 
 app.include_router(router)
+setup_metrics(app)
 
 
 @app.get("/health", tags=["system"])
@@ -38,4 +43,7 @@ async def health():
 
     Используется healthcheck'ом Docker Compose и мониторингом.
     """
-    return {"status": "ok", "service": "catalog-delivery"}
+    # instance попадает в ответ, чтобы через nginx было видно,
+    # какой из двух контейнеров обслужил запрос — наглядное доказательство
+    # того, что балансировка действительно работает.
+    return {"status": "ok", "service": "catalog-delivery", "instance": INSTANCE_NAME}

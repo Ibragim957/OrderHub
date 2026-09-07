@@ -1,0 +1,149 @@
+services:
+  # --- Базы данных: у каждого сервиса своя, это и есть Database per Service ---
+  postgres-1:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB_1}
+    volumes:
+      # Именованный том: данные переживают пересоздание контейнера.
+      - postgres-1-data:/var/lib/postgresql/data
+    healthcheck:
+      # pg_isready проверяет готовность принимать подключения, а не просто
+      # что процесс запущен: сервисы стартуют только после этого.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB_1}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres-2:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB_2}
+    volumes:
+      - postgres-2-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB_2}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # --- Брокер сообщений ---
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    ports:
+      - "15672:15672"  # веб-интерфейс управления, удобно показывать на защите
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # --- Кэш ---
+  redis:
+    image: redis:8-alpine
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # --- Order Service ---
+  service-1:
+    build: ./service-1
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-1:5432/${POSTGRES_DB_1}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      REDIS_URL: redis://redis:6379/0
+      CATALOG_SERVICE_URL: http://nginx/api/catalog
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES}
+    depends_on:
+      # condition: service_healthy — ждём готовности, а не просто запуска.
+      # Без этого сервис стартует раньше базы и падает на первой миграции.
+      postgres-1:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  # --- Catalog & Delivery Service, два инстанса для балансировки ---
+  service-2-a:
+    build: ./service-2
+    environment: &service2_env
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-2:5432/${POSTGRES_DB_2}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      REDIS_URL: redis://redis:6379/1
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES}
+      INSTANCE_NAME: service-2-a
+    depends_on: &service2_deps
+      postgres-2:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck: &service2_health
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  service-2-b:
+    build: ./service-2
+    environment:
+      # YAML-якорь: тот же набор переменных, меняется только имя инстанса —
+      # по нему в ответе /health видно, какой контейнер обслужил запрос.
+      <<: *service2_env
+      INSTANCE_NAME: service-2-b
+    depends_on: *service2_deps
+    healthcheck: *service2_health
+    restart: unless-stopped
+
+  # --- Точка входа: reverse proxy, балансировка, rate limiting ---
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - service-1
+      - service-2-a
+      - service-2-b
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres-1-data:
+  postgres-2-data:
+  rabbitmq-data:
+  redis-data:

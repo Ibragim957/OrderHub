@@ -9,4 +9,5 @@ PyJWT==2.13.0
 passlib[bcrypt]==1.7.4
 aio-pika==10.0.1
 redis==8.1.0
+httpx==0.28.1
 prometheus-fastapi-instrumentator==8.1.0

@@ -1,0 +1,19 @@
+# Конфигурация ruff — линтера, который гоняется в CI.
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle: ошибки стиля
+    "F",   # pyflakes: неиспользуемые импорты, необъявленные имена
+    "I",   # isort: порядок импортов
+    "UP",  # pyupgrade: устаревшие конструкции
+    "B",   # flake8-bugbear: типичные источники багов
+]
+ignore = [
+    # FastAPI-идиома: Depends(...) в значении по умолчанию — так работает
+    # внедрение зависимостей, bugbear ругается на это ошибочно.
+    "B008",
+]

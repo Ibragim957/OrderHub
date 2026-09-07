@@ -10,6 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import services
 from app.database import get_db
 from app.deps import CurrentUser, UserRole, get_current_user, require_admin
+from app.metrics import (
+    couriers_available,
+    menu_items_created_total,
+    restaurants_created_total,
+)
 from app.models import CourierStatus
 from app.schemas import (
     CourierCreate,
@@ -59,7 +64,9 @@ async def create_restaurant(
     db: AsyncSession = Depends(get_db),
     admin: CurrentUser = Depends(require_admin),
 ):
-    return await services.create_restaurant(db, data, owner_id=admin.id)
+    restaurant = await services.create_restaurant(db, data, owner_id=admin.id)
+    restaurants_created_total.inc()
+    return restaurant
 
 
 @router.patch("/restaurants/{restaurant_id}", response_model=RestaurantRead, tags=["restaurants"])
@@ -138,6 +145,7 @@ async def create_menu_item(
     menu_item = await services.create_menu_item(db, data)
     if menu_item is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Restaurant not found")
+    menu_items_created_total.labels(restaurant_id=str(data.restaurant_id)).inc()
     return menu_item
 
 
@@ -227,4 +235,11 @@ async def update_courier(
     if courier.user_id != current_user.id and current_user.role is not UserRole.ADMIN:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your courier profile")
 
-    return await services.update_courier(db, courier_id, data)
+    updated = await services.update_courier(db, courier_id, data)
+
+    # Пересчитываем метрику по факту, а не инкрементом: статус может меняться
+    # в обе стороны, и счётчик рассинхронизировался бы с реальностью.
+    available = await services.list_couriers(db, status=CourierStatus.AVAILABLE)
+    couriers_available.set(len(available))
+
+    return updated
