@@ -8,10 +8,11 @@
 import os
 from contextlib import asynccontextmanager
 
+from fastapi import FastAPI
+
 from app.database import engine
 from app.metrics import setup_metrics
 from app.routes import router
-from fastapi import FastAPI
 
 INSTANCE_NAME = os.getenv("INSTANCE_NAME", "service-2-local")
 
