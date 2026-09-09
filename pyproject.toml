@@ -29,3 +29,9 @@ ignore = [
 # по алфавиту вперемешку с fastapi и sqlalchemy. Принятый порядок другой:
 # стандартная библиотека, затем сторонние пакеты, затем собственный код.
 known-first-party = ["app"]
+
+[tool.pytest.ini_options]
+# asyncio_mode=auto избавляет от @pytest.mark.asyncio на каждом тесте,
+# но мы всё равно ставим pytestmark в файлах — так явнее.
+asyncio_mode = "auto"
+testpaths = ["tests"]

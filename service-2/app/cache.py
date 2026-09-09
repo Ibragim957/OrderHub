@@ -79,8 +79,9 @@ async def get_cached(key: str) -> list | dict | None:
     """
     try:
         raw = await get_client().get(key)
-    except (RedisError, OSError) as exc:
-        # OSError покрывает случай, когда Redis вообще не поднят.
+    except (RedisError, OSError, RuntimeError) as exc:
+        # OSError — Redis не поднят; RuntimeError — закрытый цикл событий.
+        # Любая беда с кэшем означает одно: читаем из базы.
         logger.warning("Redis unavailable on read, falling back to database: %s", exc)
         return None
 
@@ -101,7 +102,7 @@ async def set_cached(key: str, value: list | dict, ttl: int = CACHE_TTL_SECONDS)
         # default=str нужен для Decimal и datetime: json их не умеет,
         # а в ответах каталога есть и то, и другое.
         await get_client().set(key, json.dumps(value, default=str), ex=ttl)
-    except (RedisError, OSError) as exc:
+    except (RedisError, OSError, RuntimeError) as exc:
         logger.warning("Redis unavailable on write, skipping cache: %s", exc)
 
 
@@ -121,7 +122,7 @@ async def invalidate_restaurants() -> None:
         if keys:
             await client.delete(*keys)
             logger.info("Invalidated %d cached restaurant entries", len(keys))
-    except (RedisError, OSError) as exc:
+    except (RedisError, OSError, RuntimeError) as exc:
         # Сброс не удался — данные в кэше устареют максимум на TTL.
         # Это неприятно, но не повод отменять уже выполненное изменение.
         logger.warning("Redis unavailable on invalidation: %s", exc)
@@ -131,5 +132,5 @@ async def ping() -> bool:
     """Доступен ли Redis. Используется в /health."""
     try:
         return bool(await get_client().ping())
-    except (RedisError, OSError):
+    except (RedisError, OSError, RuntimeError):
         return False
