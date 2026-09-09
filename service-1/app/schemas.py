@@ -66,3 +66,17 @@ class OrderRead(BaseModel):
     updated_at: datetime
     items: list[OrderItemRead]
     model_config = ConfigDict(from_attributes=True)
+
+# ------------------Аутентификация--------------------------
+
+class LoginRequest(BaseModel):
+    email: str = Field(..., max_length=255)
+    password: str = Field(..., min_length=8)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    # token_type описан в стандарте OAuth2: клиент по нему понимает, что
+    # токен надо слать как "Authorization: Bearer <token>".
+    token_type: str = "bearer"
+    expires_in_minutes: int

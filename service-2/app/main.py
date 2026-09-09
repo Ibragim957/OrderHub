@@ -10,6 +10,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.cache import close_client
+from app.cache import ping as redis_ping
 from app.database import engine
 from app.metrics import setup_metrics
 from app.routes import router
@@ -21,6 +23,7 @@ INSTANCE_NAME = os.getenv("INSTANCE_NAME", "service-2-local")
 async def lifespan(app: FastAPI):
     # Здесь позже поднимаются подключения к RabbitMQ и Redis.
     yield
+    await close_client()
     # Корректно закрываем пул подключений к БД при остановке сервиса,
     # иначе Postgres будет какое-то время держать осиротевшие соединения.
     await engine.dispose()
@@ -46,4 +49,11 @@ async def health():
     # instance попадает в ответ, чтобы через nginx было видно,
     # какой из двух контейнеров обслужил запрос — наглядное доказательство
     # того, что балансировка действительно работает.
-    return {"status": "ok", "service": "catalog-delivery", "instance": INSTANCE_NAME}
+    # Redis показываем отдельным полем, но общий статус от него НЕ зависит:
+    # сервис исправен и без кэша, просто работает медленнее.
+    return {
+        "status": "ok",
+        "service": "catalog-delivery",
+        "instance": INSTANCE_NAME,
+        "redis": "up" if await redis_ping() else "down",
+    }

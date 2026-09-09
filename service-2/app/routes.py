@@ -7,10 +7,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import services
+from app import cache, services
 from app.database import get_db
 from app.deps import CurrentUser, UserRole, get_current_user, require_admin
 from app.metrics import (
+    cache_operations_total,
     couriers_available,
     menu_items_created_total,
     restaurants_created_total,
@@ -40,8 +41,27 @@ async def list_restaurants(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    """Публичный список ресторанов — именно его будем кэшировать в Redis."""
-    return await services.list_restaurants(db, skip=skip, limit=limit)
+    """Публичный список ресторанов. Читается часто, меняется редко — кэшируем.
+
+    Схема "cache-aside": сначала спрашиваем кэш, при промахе идём в базу и
+    кладём результат обратно. Если Redis недоступен, cache.get_cached вернёт
+    None, и запрос просто отработает через базу — клиент ничего не заметит.
+    """
+    key = cache.restaurants_key(skip, limit)
+
+    cached = await cache.get_cached(key)
+    if cached is not None:
+        cache_operations_total.labels(operation="list_restaurants", result="hit").inc()
+        return cached
+
+    cache_operations_total.labels(operation="list_restaurants", result="miss").inc()
+    restaurants = await services.list_restaurants(db, skip=skip, limit=limit)
+
+    # В кэш кладём уже сериализованные данные, а не ORM-объекты: последние
+    # привязаны к закрывшейся сессии и в JSON не превращаются.
+    payload = [RestaurantRead.model_validate(r).model_dump(mode="json") for r in restaurants]
+    await cache.set_cached(key, payload)
+    return payload
 
 
 @router.get("/restaurants/{restaurant_id}", response_model=RestaurantRead, tags=["restaurants"])
@@ -66,6 +86,8 @@ async def create_restaurant(
 ):
     restaurant = await services.create_restaurant(db, data, owner_id=admin.id)
     restaurants_created_total.inc()
+    # Список изменился — старый кэш больше не отражает реальность.
+    await cache.invalidate_restaurants()
     return restaurant
 
 
@@ -79,6 +101,7 @@ async def update_restaurant(
     restaurant = await services.update_restaurant(db, restaurant_id, data)
     if restaurant is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Restaurant not found")
+    await cache.invalidate_restaurants()
     return restaurant
 
 
@@ -94,6 +117,7 @@ async def delete_restaurant(
 ):
     if not await services.delete_restaurant(db, restaurant_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Restaurant not found")
+    await cache.invalidate_restaurants()
 
 
 # ------------------ Меню --------------------------

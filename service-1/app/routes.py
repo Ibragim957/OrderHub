@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import services
+from app.auth import JWT_EXPIRE_MINUTES, create_access_token
 from app.database import get_db
 from app.deps import CurrentUser, get_current_user, require_admin
 from app.exceptions import CatalogUnavailable, InvalidOrderItems, InvalidStatusTransition
@@ -18,7 +19,15 @@ from app.metrics import (
     orders_created_total,
 )
 from app.models import OrderStatus, UserRole
-from app.schemas import OrderCreate, OrderRead, UserCreate, UserRead, UserUpdate
+from app.schemas import (
+    LoginRequest,
+    OrderCreate,
+    OrderRead,
+    TokenResponse,
+    UserCreate,
+    UserRead,
+    UserUpdate,
+)
 
 router = APIRouter()
 
@@ -37,6 +46,24 @@ async def register_user(data: UserCreate, db: AsyncSession = Depends(get_db)):
     if user is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Email already registered")
     return user
+
+
+@router.post("/auth/login", response_model=TokenResponse, tags=["auth"])
+async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
+    """Выдаёт JWT в обмен на email и пароль."""
+    user = await services.authenticate_user(db, data.email, data.password)
+    if user is None:
+        # Намеренно не уточняем, что именно не подошло — email или пароль.
+        # Иначе по разнице ответов можно перебором выяснить, какие адреса
+        # зарегистрированы в системе.
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            "Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    token = create_access_token(user.id, user.full_name, user.role.value)
+    return TokenResponse(access_token=token, expires_in_minutes=JWT_EXPIRE_MINUTES)
 
 
 @router.get("/users/me", response_model=UserRead, tags=["users"])
