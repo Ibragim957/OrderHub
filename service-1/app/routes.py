@@ -7,7 +7,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import services
+from app import messaging, services
 from app.auth import JWT_EXPIRE_MINUTES, create_access_token
 from app.database import get_db
 from app.deps import CurrentUser, get_current_user, require_admin
@@ -132,6 +132,10 @@ async def create_order(
     catalog_requests_total.labels(result="ok").inc()
     orders_created_total.labels(restaurant_id=str(order.restaurant_id)).inc()
     order_value.observe(float(order.total_price))
+
+    # Событие публикуется ПОСЛЕ успешного коммита: сообщать о заказе,
+    # который не сохранился, нельзя.
+    await messaging.publish_order_created(order)
     return order
 
 
@@ -189,6 +193,7 @@ async def change_order_status(
     order_status_transitions_total.labels(
         from_status=previous_status.value, to_status=new_status.value
     ).inc()
+    await messaging.publish_order_status_changed(order, previous_status.value)
     return order
 
 

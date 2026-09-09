@@ -5,24 +5,40 @@
 и через события RabbitMQ.
 """
 
+import logging
 import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app import messaging
 from app.cache import close_client
 from app.cache import ping as redis_ping
 from app.database import engine
 from app.metrics import setup_metrics
 from app.routes import router
 
+# Без явной настройки сообщения logging из наших модулей никуда не выводятся:
+# uvicorn настраивает только свои логгеры. Без этого события RabbitMQ и
+# предупреждения о недоступном Redis работали бы "втихую".
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)-7s %(name)s | %(message)s",
+)
+
 INSTANCE_NAME = os.getenv("INSTANCE_NAME", "service-2-local")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Здесь позже поднимаются подключения к RabbitMQ и Redis.
+    await messaging.connect()
+    consumer = messaging.start_consumer()
+
     yield
+
+    if consumer is not None:
+        consumer.cancel()
+    await messaging.close()
     await close_client()
     # Корректно закрываем пул подключений к БД при остановке сервиса,
     # иначе Postgres будет какое-то время держать осиротевшие соединения.
