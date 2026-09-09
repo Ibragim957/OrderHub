@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 # fetch_menu_items, InvalidOrderItems и OrderItem пока не используются:
 # они подготовлены для create_order, которая ещё не реализована.
 from app.catalog_client import fetch_menu_items  # noqa: F401
-from app.exceptions import InvalidOrderItems, InvalidStatusTransition  # noqa: F401
+from app.exceptions import CatalogUnavailable, InvalidOrderItems, InvalidStatusTransition  # noqa: F401
 from app.models import Order, OrderItem, OrderStatus, User, UserRole  # noqa: F401
 from app.schemas import OrderCreate, UserCreate, UserUpdate
 from app.security import hash_password, verify_password
@@ -104,48 +104,44 @@ ALLOWED_TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
 async def create_order(
     db: AsyncSession, data: OrderCreate, user_id: int, customer_name: str
 ) -> Order:
-    """Создаёт заказ, посчитав сумму по ценам из каталога.
+    """Создаёт заказ, посчитав сумму по ценам из каталога"""
+    list_of_menu_item_ids = [item.menu_item_id for item in data.order_items]
+    menu_items = await fetch_menu_items(list_of_menu_item_ids)
+    catalog = {item["id"]: item for item in menu_items}
+    total = Decimal("0")
+    order_items = []
 
-    ЗАГОТОВКА - реализовать самостоятельно.
+    for requested in data.order_items:
+        item = catalog.get(requested.menu_item_id)
+        if item is None:
+            raise InvalidOrderItems(f"Menu item {requested.menu_item_id} is Invalid")
+        if item["restaurant_id"] != data.restaurant_id:
+            raise InvalidOrderItems(f"Menu item {requested.menu_item_id} is from another restaurant")
+        if item["is_available"] is False:
+            raise InvalidOrderItems(f"Menu item {requested.menu_item_id} is not available")
+        price = Decimal(str(item["price"]))
+        total += price * requested.quantity
+        order_items.append(OrderItem(
+            menu_item_id=requested.menu_item_id,
+            quantity=requested.quantity,
+            product_name_snapshot=item["name"],
+            price_at_order=Decimal(str(item["price"]))
+        ))    
 
-    Что должно произойти по шагам:
+    order = Order(
+        user_id=user_id,
+        restaurant_id=data.restaurant_id,
+        customer_name_snapshot=customer_name,
+        total_price=total,
+        items=order_items
+    )
 
-    1. Собрать список menu_item_id из data.order_items и запросить позиции
-       у каталога ОДНИМ вызовом: await fetch_menu_items([...]).
-       Именно одним, а не по вызову на позицию: N запросов по сети гораздо
-       дороже, чем N запросов к своей базе.
+    db.add(order)
+    await db.commit()
+    await db.refresh(order)
 
-       Если каталог недоступен, fetch_menu_items сам бросит CatalogUnavailable,
-       перехватывать не нужно - роут вернёт 503.
-
-    2. Проверить каждую запрошенную позицию. Бросить InvalidOrderItems, если:
-       - позиции нет в ответе каталога (её удалили или id выдуман);
-       - её restaurant_id не совпадает с data.restaurant_id, иначе можно
-         собрать заказ из блюд разных ресторанов и его некому готовить;
-       - is_available == False, блюдо снято с продажи.
-
-    3. Посчитать сумму на сервере: сумма по всем позициям цена * количество.
-       Цены брать ТОЛЬКО из ответа каталога: клиент цены не присылает,
-       иначе заказ можно оформить за рубль.
-       Оборачивать в Decimal(str(price)) - float здесь испортит копейки.
-
-    4. Создать Order (status по умолчанию CREATED, courier_id пока None)
-       и для каждой позиции OrderItem, зафиксировав снимки:
-       product_name_snapshot - название из каталога на этот момент,
-       price_at_order - цена на этот момент.
-       Позиции складывать в order.items, SQLAlchemy сохранит их каскадом.
-
-    5. Один db.add(order), один await db.commit(), затем db.refresh(order).
-       Одна транзакция на весь заказ: либо сохранится заказ со всеми
-       позициями, либо не сохранится ничего. Заказ без позиций недопустим.
-
-    6. Вернуть order.
-
-    Под рукой уже есть: fetch_menu_items, InvalidOrderItems, Decimal, Order,
-    OrderItem - всё импортировано выше. Ответ каталога - список словарей
-    с ключами id, restaurant_id, name, price, is_available.
-    """
-    raise NotImplementedError("create_order: реализовать по описанию выше")
+    return await get_order(db, order.id)
+    
 
 
 async def get_order(db: AsyncSession, order_id: int) -> Order | None:
