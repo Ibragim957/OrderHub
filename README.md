@@ -57,6 +57,7 @@ docker compose up --build
 |---|---|
 | API через nginx | http://localhost:8080/api/catalog/ , http://localhost:8080/api/orders/ |
 | Swagger каталога | http://localhost:8080/api/catalog/docs |
+| Swagger заказов | http://localhost:8080/api/orders/docs |
 | RabbitMQ management | http://localhost:15672 |
 | Метрики Prometheus | `/metrics` у каждого сервиса |
 
@@ -66,6 +67,21 @@ docker compose up --build
 for i in 1 2 3 4; do curl -s localhost:8080/api/catalog/health; echo; done
 # instance чередуется между service-2-a и service-2-b
 ```
+
+## Вход и роли
+
+Регистрация — `POST /api/orders/users`, токен — `POST /api/orders/auth/login`.
+Токен передаётся в заголовке `Authorization: Bearer <token>`, в Swagger — через кнопку
+**Authorize**. Оба сервиса принимают один и тот же токен.
+
+Роль администратора через API не выдаётся — иначе любой назначил бы её себе сам.
+Её назначают напрямую в базе:
+
+```bash
+docker compose exec postgres-1 psql -U postgres -d service_1_db \n  -c "UPDATE users SET role='ADMIN' WHERE email='you@example.com'"
+```
+
+После этого токен нужно получить заново: роль записывается в него при выдаче.
 
 ## Локальная разработка без Docker
 
@@ -79,6 +95,9 @@ uvicorn app.main:app --reload --port 8002
 ## Миграции
 
 У каждого сервиса своя история миграций — следствие Database per Service.
+В Docker их выполняют одноразовые контейнеры `migrate-1` и `migrate-2` до старта
+сервисов: если бы миграции запускала каждая реплика, две реплики каталога делали бы
+это одновременно и мешали друг другу.
 
 ```bash
 cd service-1        # или service-2

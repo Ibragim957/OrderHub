@@ -1,4 +1,4 @@
-from prometheus_client import Counter, Gauge, Histogram
+from prometheus_client import Counter, Histogram
 from prometheus_fastapi_instrumentator import Instrumentator
 
 orders_created_total = Counter(
@@ -23,11 +23,6 @@ catalog_requests_total = Counter(
     "orders_catalog_requests_total",
     "Запросы к сервису каталога",
     ["result"],
-)
-
-orders_awaiting_courier = Gauge(
-    "orders_awaiting_courier",
-    "Заказы без назначенного курьера",
 )
 
 

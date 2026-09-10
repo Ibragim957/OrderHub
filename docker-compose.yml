@@ -88,9 +88,11 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-1:5432/${POSTGRES_DB_1}
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
-      REDIS_URL: redis://redis:6379/0
       CATALOG_SERVICE_URL: http://nginx/api/catalog
       INSTANCE_NAME: service-1
+      # Префикс, под которым nginx выставляет сервис: без него Swagger
+      # запрашивает схему по /openapi.json и получает 404.
+      ROOT_PATH: /api/orders
       JWT_SECRET: ${JWT_SECRET}
       JWT_ALGORITHM: ${JWT_ALGORITHM}
       JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES}
@@ -102,8 +104,6 @@ services:
       migrate-1:
         condition: service_completed_successfully
       rabbitmq:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
@@ -123,6 +123,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       JWT_ALGORITHM: ${JWT_ALGORITHM}
       JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES}
+      ROOT_PATH: /api/catalog
       INSTANCE_NAME: service-2-a
     depends_on: &service2_deps
       postgres-2:

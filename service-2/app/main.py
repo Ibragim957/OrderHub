@@ -38,6 +38,7 @@ app = FastAPI(
     description="Рестораны, меню и курьеры",
     version="0.1.0",
     lifespan=lifespan,
+    root_path=os.getenv("ROOT_PATH", ""),
 )
 
 app.include_router(router)
