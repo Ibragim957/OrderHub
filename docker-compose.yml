@@ -59,6 +59,29 @@ services:
       timeout: 3s
       retries: 10
 
+  # --- Миграции: одноразовые контейнеры, отрабатывают до старта сервисов ---
+  # Если накатывать миграции при старте каждой реплики, две реплики каталога
+  # делают это одновременно и одна из них падает на гонке за alembic_version.
+  migrate-1:
+    build: ./service-1
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-1:5432/${POSTGRES_DB_1}
+    depends_on:
+      postgres-1:
+        condition: service_healthy
+    restart: "no"
+
+  migrate-2:
+    build: ./service-2
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-2:5432/${POSTGRES_DB_2}
+    depends_on:
+      postgres-2:
+        condition: service_healthy
+    restart: "no"
+
   # --- Order Service ---
   service-1:
     build: ./service-1
@@ -67,14 +90,17 @@ services:
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       REDIS_URL: redis://redis:6379/0
       CATALOG_SERVICE_URL: http://nginx/api/catalog
+      INSTANCE_NAME: service-1
       JWT_SECRET: ${JWT_SECRET}
       JWT_ALGORITHM: ${JWT_ALGORITHM}
       JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES}
     depends_on:
       # condition: service_healthy — ждём готовности, а не просто запуска.
-      # Без этого сервис стартует раньше базы и падает на первой миграции.
+      # Без этого сервис стартует раньше базы и падает на первом запросе.
       postgres-1:
         condition: service_healthy
+      migrate-1:
+        condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
       redis:
@@ -101,6 +127,8 @@ services:
     depends_on: &service2_deps
       postgres-2:
         condition: service_healthy
+      migrate-2:
+        condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
       redis:
@@ -136,7 +164,9 @@ services:
       - service-2-a
       - service-2-b
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost/health"]
+      # 127.0.0.1, а не localhost: в Alpine localhost резолвится в IPv6 ::1,
+      # а nginx слушает только IPv4 — проба получала бы Connection refused.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/health"]
       interval: 10s
       timeout: 5s
       retries: 5
