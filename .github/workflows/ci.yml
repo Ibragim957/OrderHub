@@ -11,9 +11,9 @@ jobs:
     name: Линтер (ruff)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
@@ -60,9 +60,9 @@ jobs:
           --health-retries 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
@@ -94,7 +94,7 @@ jobs:
       matrix:
         service: [service-1, service-2]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Сборка образа ${{ matrix.service }}
         run: docker build -t orderhub-${{ matrix.service }}:${{ github.sha }} ./${{ matrix.service }}
