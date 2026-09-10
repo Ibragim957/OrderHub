@@ -1,9 +1,3 @@
-"""HTTP-слой: маршруты, коды ответов, проверка прав.
-
-Роуты намеренно тонкие — вся работа делегируется в services.py. Здесь решается
-только то, что относится к вебу: какой URL, какой код вернуть, кто имеет доступ.
-"""
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,12 +35,6 @@ async def list_restaurants(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    """Публичный список ресторанов. Читается часто, меняется редко — кэшируем.
-
-    Схема "cache-aside": сначала спрашиваем кэш, при промахе идём в базу и
-    кладём результат обратно. Если Redis недоступен, cache.get_cached вернёт
-    None, и запрос просто отработает через базу — клиент ничего не заметит.
-    """
     key = cache.restaurants_key(skip, limit)
 
     cached = await cache.get_cached(key)
@@ -57,8 +45,6 @@ async def list_restaurants(
     cache_operations_total.labels(operation="list_restaurants", result="miss").inc()
     restaurants = await services.list_restaurants(db, skip=skip, limit=limit)
 
-    # В кэш кладём уже сериализованные данные, а не ORM-объекты: последние
-    # привязаны к закрывшейся сессии и в JSON не превращаются.
     payload = [RestaurantRead.model_validate(r).model_dump(mode="json") for r in restaurants]
     await cache.set_cached(key, payload)
     return payload
@@ -68,7 +54,6 @@ async def list_restaurants(
 async def get_restaurant(restaurant_id: int, db: AsyncSession = Depends(get_db)):
     restaurant = await services.get_restaurant(db, restaurant_id)
     if restaurant is None:
-        # Сервис вернул None; решение отдать 404 принимается здесь, в HTTP-слое.
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Restaurant not found")
     return restaurant
 
@@ -86,7 +71,6 @@ async def create_restaurant(
 ):
     restaurant = await services.create_restaurant(db, data, owner_id=admin.id)
     restaurants_created_total.inc()
-    # Список изменился — старый кэш больше не отражает реальность.
     await cache.invalidate_restaurants()
     return restaurant
 
@@ -143,7 +127,6 @@ async def get_menu_items_by_ids(
     ids: list[int] = Query(..., description="Идентификаторы позиций меню"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Пакетная выборка для service-1: цены всех позиций заказа одним запросом."""
     return await services.get_menu_items_by_ids(db, ids)
 
 
@@ -254,15 +237,11 @@ async def update_courier(
     if courier is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Courier not found")
 
-    # Свой профиль курьер меняет сам; чужой — только админ.
-    # Роли всего две, принадлежность ресурса проверяется отдельно от роли.
     if courier.user_id != current_user.id and current_user.role is not UserRole.ADMIN:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your courier profile")
 
     updated = await services.update_courier(db, courier_id, data)
 
-    # Пересчитываем метрику по факту, а не инкрементом: статус может меняться
-    # в обе стороны, и счётчик рассинхронизировался бы с реальностью.
     available = await services.list_couriers(db, status=CourierStatus.AVAILABLE)
     couriers_available.set(len(available))
 

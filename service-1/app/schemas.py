@@ -13,12 +13,10 @@ class UserCreate(BaseModel):
     password: str = Field(..., min_length=8)
 
 
-
 class UserUpdate(BaseModel):
     email: str | None = Field(None, max_length=255)
     password: str | None = Field(None, min_length=8)
     is_active: bool | None = None
-
 
 
 class UserRead(BaseModel):
@@ -76,7 +74,5 @@ class LoginRequest(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
-    # token_type описан в стандарте OAuth2: клиент по нему понимает, что
-    # токен надо слать как "Authorization: Bearer <token>".
     token_type: str = "bearer"
     expires_in_minutes: int

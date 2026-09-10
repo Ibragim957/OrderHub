@@ -48,11 +48,8 @@ class Order(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
 
-    # restaurant_id / courier_id ссылаются на записи в service-2 (своя БД),
-    # поэтому это просто числа без ForeignKey. Целостность обеспечивается
-    # через события RabbitMQ, а не через constraint в этой БД.
     restaurant_id: Mapped[int] = mapped_column(nullable=False, index=True)
-    courier_id: Mapped[int | None] = mapped_column(nullable=True, index=True)  # назначается позже
+    courier_id: Mapped[int | None] = mapped_column(nullable=True, index=True)
 
     status: Mapped[OrderStatus] = mapped_column(SqlEnum(OrderStatus), nullable=False, default=OrderStatus.CREATED)
     total_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)

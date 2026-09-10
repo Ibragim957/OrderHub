@@ -60,7 +60,6 @@ class MenuItemRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-
 # ------------------Курьер--------------------------
 
 class CourierCreate(BaseModel):

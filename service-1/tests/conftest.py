@@ -1,13 +1,3 @@
-"""Общая обвязка для тестов Order Service.
-
-Тесты идут против SQLite в памяти, а не против PostgreSQL: так они не требуют
-поднятой базы, не мешают друг другу и выполняются мгновенно.
-
-Каталог (service-2) в тестах не поднимаем: вместо него подставляем фикстуру
-fake_catalog. Проверять надо логику заказа, а не сеть, и тест не должен
-зависеть от того, запущен ли соседний сервис.
-"""
-
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -21,7 +11,6 @@ from app.models import Base
 
 @pytest_asyncio.fixture
 async def db_session():
-    """Свежая база на каждый тест."""
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -35,7 +24,6 @@ async def db_session():
 
 @pytest_asyncio.fixture
 async def client(db_session):
-    """HTTP-клиент поверх приложения, без реального сетевого сервера."""
 
     async def override_get_db():
         yield db_session
@@ -63,12 +51,6 @@ def admin_headers():
 
 @pytest.fixture
 def fake_catalog(monkeypatch):
-    """Подменяет HTTP-вызов к каталогу заранее заданным ответом.
-
-    monkeypatch правит именно app.services.fetch_menu_items, а не
-    app.catalog_client.fetch_menu_items: services импортировал функцию к себе
-    в модуль, и подмена в исходном модуле на него уже не повлияла бы.
-    """
     from app import services
 
     items = [
@@ -86,7 +68,6 @@ def fake_catalog(monkeypatch):
 
 @pytest.fixture
 def broken_catalog(monkeypatch):
-    """Каталог недоступен — проверяем, что заказ отвечает 503, а не 500."""
     from app import services
     from app.exceptions import CatalogUnavailable
 
@@ -98,7 +79,6 @@ def broken_catalog(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def no_events(monkeypatch):
-    """Отключает публикацию в RabbitMQ: брокер в тестах не нужен."""
     from app import messaging
 
     async def noop(*args, **kwargs):

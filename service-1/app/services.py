@@ -1,18 +1,9 @@
-"""Слой бизнес-логики Order Service.
-
-Функции не знают про HTTP: принимают сессию БД и данные, возвращают ORM-объекты
-или None, а о проблемах сообщают доменными исключениями из exceptions.py.
-Перевод в коды ответа — задача routes.py.
-"""
-
 from decimal import Decimal  # noqa: F401  -- нужен в create_order
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-# fetch_menu_items, InvalidOrderItems и OrderItem пока не используются:
-# они подготовлены для create_order, которая ещё не реализована.
 from app.catalog_client import fetch_menu_items  # noqa: F401
 from app.exceptions import CatalogUnavailable, InvalidOrderItems, InvalidStatusTransition  # noqa: F401
 from app.models import Order, OrderItem, OrderStatus, User, UserRole  # noqa: F401
@@ -34,17 +25,13 @@ async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
 
 
 async def create_user(db: AsyncSession, data: UserCreate) -> User | None:
-    """Регистрирует пользователя. Возвращает None, если email уже занят."""
     if await get_user_by_email(db, data.email) is not None:
         return None
 
     user = User(
         email=data.email,
         full_name=data.full_name,
-        # Пароль в базу не попадает никогда — только его хеш.
         hashed_password=hash_password(data.password),
-        # Роль назначает сервер, а не клиент: иначе любой при регистрации
-        # объявил бы себя админом.
         role=UserRole.USER,
     )
     db.add(user)
@@ -54,7 +41,6 @@ async def create_user(db: AsyncSession, data: UserCreate) -> User | None:
 
 
 async def authenticate_user(db: AsyncSession, email: str, password: str) -> User | None:
-    """Проверяет пару email/пароль. Понадобится эндпоинту выдачи JWT."""
     user = await get_user_by_email(db, email)
     if user is None or not user.is_active:
         return None
@@ -69,8 +55,6 @@ async def update_user(db: AsyncSession, user_id: int, data: UserUpdate) -> User 
         return None
 
     payload = data.model_dump(exclude_unset=True)
-    # Пароль приходит в открытом виде и требует отдельной обработки:
-    # в модели поле называется иначе и хранит хеш.
     if "password" in payload:
         user.hashed_password = hash_password(payload.pop("password"))
 
@@ -86,16 +70,11 @@ async def update_user(db: AsyncSession, user_id: int, data: UserUpdate) -> User 
 # Заказы
 # --------------------------------------------------------------------------
 
-# Допустимые переходы между статусами. Без такой таблицы enum остаётся
-# декоративным: в базу можно записать любой статус в любой момент, и заказ
-# съедет, например, из delivered обратно в created.
 ALLOWED_TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
     OrderStatus.CREATED: {OrderStatus.CONFIRMED, OrderStatus.CANCELLED},
     OrderStatus.CONFIRMED: {OrderStatus.COOKING, OrderStatus.CANCELLED},
     OrderStatus.COOKING: {OrderStatus.DELIVERING, OrderStatus.CANCELLED},
-    # После передачи курьеру отмена невозможна: еда приготовлена и уже в пути.
     OrderStatus.DELIVERING: {OrderStatus.DELIVERED},
-    # Терминальные состояния: выхода из них нет.
     OrderStatus.DELIVERED: set(),
     OrderStatus.CANCELLED: set(),
 }
@@ -104,7 +83,6 @@ ALLOWED_TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
 async def create_order(
     db: AsyncSession, data: OrderCreate, user_id: int, customer_name: str
 ) -> Order:
-    """Создаёт заказ, посчитав сумму по ценам из каталога"""
     list_of_menu_item_ids = [item.menu_item_id for item in data.order_items]
     menu_items = await fetch_menu_items(list_of_menu_item_ids)
     catalog = {item["id"]: item for item in menu_items}
@@ -145,12 +123,6 @@ async def create_order(
 
 
 async def get_order(db: AsyncSession, order_id: int) -> Order | None:
-    """Возвращает заказ вместе с позициями.
-
-    selectinload обязателен: OrderRead включает вложенный список items, а в
-    асинхронном режиме ленивая подгрузка связи вне await-вызова падает
-    с MissingGreenlet. Здесь связь загружается сразу, отдельным запросом.
-    """
     result = await db.execute(
         select(Order).where(Order.id == order_id).options(selectinload(Order.items))
     )
@@ -163,12 +135,6 @@ async def list_orders(
     skip: int = 0,
     limit: int = 20,
 ) -> list[Order]:
-    """Список заказов. user_id=None означает "все" - так их видит админ.
-
-    Тот же selectinload, и здесь он решает проблему N+1: без него на список
-    из 50 заказов ушёл бы 1 запрос за заказами плюс 50 за позициями.
-    С ним - ровно 2 запроса независимо от количества заказов.
-    """
     query = select(Order).options(selectinload(Order.items))
     if user_id is not None:
         query = query.where(Order.user_id == user_id)
@@ -180,11 +146,6 @@ async def list_orders(
 async def update_order_status(
     db: AsyncSession, order_id: int, new_status: OrderStatus
 ) -> Order | None:
-    """Меняет статус заказа с проверкой допустимости перехода.
-
-    Возвращает None, если заказа нет; бросает InvalidStatusTransition,
-    если переход запрещён.
-    """
     order = await get_order(db, order_id)
     if order is None:
         return None
@@ -201,12 +162,6 @@ async def update_order_status(
 
 
 async def assign_courier(db: AsyncSession, order_id: int, courier_id: int) -> Order | None:
-    """Привязывает курьера к заказу.
-
-    Вызывается не только из роута, но и из обработчика события RabbitMQ,
-    когда service-2 сообщает о назначении курьера. Ради таких случаев
-    сервисный слой и не знает про HTTP.
-    """
     order = await get_order(db, order_id)
     if order is None:
         return None

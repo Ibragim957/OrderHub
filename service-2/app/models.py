@@ -17,7 +17,6 @@ class Restaurant(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
-    # owner_id ссылается на User в service-1 (своя БД) — без ForeignKey.
     owner_id: Mapped[int] = mapped_column(nullable=False, index=True)
 
     name: Mapped[str] = mapped_column(String(150), nullable=False)
@@ -59,7 +58,6 @@ class Courier(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
-    # user_id ссылается на User в service-1 (своя БД) — без ForeignKey.
     user_id: Mapped[int] = mapped_column(nullable=False, unique=True, index=True)
 
     full_name_snapshot: Mapped[str] = mapped_column(String(100), nullable=False)

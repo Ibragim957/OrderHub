@@ -1,13 +1,3 @@
-"""Обмен событиями через RabbitMQ со стороны каталога.
-
-Этот сервис:
-  - слушает order.* от service-1 и назначает курьера на новый заказ;
-  - публикует courier.assigned, чтобы service-1 записал курьера в свой заказ.
-
-Обратите внимание, что получается настоящий двусторонний обмен: ни один сервис
-не вызывает другой напрямую, но оба остаются согласованными.
-"""
-
 import asyncio
 import json
 import logging
@@ -77,12 +67,6 @@ async def publish_courier_assigned(order_id: int, courier_id: int) -> bool:
 
 
 async def consume_order_events() -> None:
-    """Слушает order.* и на новый заказ подбирает свободного курьера.
-
-    Это и есть польза от событий: подбор курьера может занять время и
-    сорваться, но клиент не должен ждать его при оформлении заказа. Заказ
-    создаётся мгновенно, а курьер назначается фоном.
-    """
     if _connection is None:
         logger.warning("Order consumer not started: no RabbitMQ connection")
         return
@@ -93,9 +77,6 @@ async def consume_order_events() -> None:
     from app.services import list_couriers, update_courier
 
     channel = await _connection.channel()
-    # prefetch_count=1: брокер не выдаст следующее сообщение, пока не
-    # подтверждено текущее. Иначе два заказа могли бы одновременно получить
-    # одного и того же свободного курьера.
     await channel.set_qos(prefetch_count=1)
 
     queue = await channel.declare_queue("service-2.order-events", durable=True)
@@ -113,8 +94,6 @@ async def consume_order_events() -> None:
                     logger.error("Malformed order event: %s", exc)
                     continue
 
-                # Курьера ищем только для новых заказов; события о смене
-                # статуса просто логируем.
                 if message.routing_key != "order.created":
                     logger.info("Order event %s: %s", message.routing_key, event)
                     continue

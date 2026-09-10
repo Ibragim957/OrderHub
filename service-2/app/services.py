@@ -1,11 +1,3 @@
-"""Слой бизнес-логики.
-
-Функции этого модуля ничего не знают про HTTP: они принимают сессию БД и данные,
-возвращают ORM-объекты, None или bool. Превращать результат в HTTP-ответ
-(404, 403, коды статуса) — задача routes.py. Благодаря этому их можно вызывать
-не только из роутов, но и из обработчиков событий RabbitMQ или из тестов.
-"""
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,12 +17,10 @@ from app.schemas import (
 async def create_restaurant(
     db: AsyncSession, data: RestaurantCreate, owner_id: int
 ) -> Restaurant:
-    # owner_id приходит отдельным аргументом, а не в data: его источник — JWT,
-    # клиент не может назначить владельцем кого-то другого.
     restaurant = Restaurant(**data.model_dump(), owner_id=owner_id)
     db.add(restaurant)
     await db.commit()
-    await db.refresh(restaurant)  # подтягиваем id и created_at, проставленные БД
+    await db.refresh(restaurant)
     return restaurant
 
 
@@ -54,8 +44,6 @@ async def update_restaurant(
     if restaurant is None:
         return None
 
-    # exclude_unset=True оставляет только поля, реально присланные клиентом.
-    # Без него PATCH с одним полем затёр бы остальные значениями None.
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(restaurant, field, value)
 
@@ -78,8 +66,6 @@ async def delete_restaurant(db: AsyncSession, restaurant_id: int) -> bool:
 
 
 async def create_menu_item(db: AsyncSession, data: MenuItemCreate) -> MenuItem | None:
-    # Ресторан лежит в этой же БД, поэтому проверяем существование напрямую.
-    # Возвращаем None, если его нет — роут превратит это в 404.
     restaurant = await db.get(Restaurant, data.restaurant_id)
     if restaurant is None:
         return None
@@ -109,11 +95,6 @@ async def list_menu_items(
 async def get_menu_items_by_ids(
     db: AsyncSession, menu_item_ids: list[int]
 ) -> list[MenuItem]:
-    """Пакетная выборка по списку id.
-
-    Нужна service-1: при создании заказа он одним запросом получает цены всех
-    позиций сразу, вместо отдельного запроса на каждую (это и есть защита от N+1).
-    """
     if not menu_item_ids:
         return []
 
@@ -152,17 +133,15 @@ async def delete_menu_item(db: AsyncSession, menu_item_id: int) -> bool:
 async def create_courier(
     db: AsyncSession, data: CourierCreate, user_id: int, full_name: str
 ) -> Courier | None:
-    # user_id и имя берутся из JWT, а не из тела запроса.
-    # full_name сохраняется снимком: имя в service-1 может измениться позже.
     existing = await get_courier_by_user_id(db, user_id)
     if existing is not None:
-        return None  # один пользователь — один профиль курьера
+        return None
 
     courier = Courier(
         **data.model_dump(),
         user_id=user_id,
         full_name_snapshot=full_name,
-        status=CourierStatus.OFFLINE,  # на смену курьер выходит явным действием
+        status=CourierStatus.OFFLINE,
     )
     db.add(courier)
     await db.commit()

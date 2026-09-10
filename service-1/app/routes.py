@@ -1,9 +1,3 @@
-"""HTTP-слой Order Service.
-
-Роуты тонкие: разбирают запрос, зовут services.py, переводят его ответ
-в код HTTP. Доменные исключения превращаются в статусы здесь и только здесь.
-"""
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,12 +44,8 @@ async def register_user(data: UserCreate, db: AsyncSession = Depends(get_db)):
 
 @router.post("/auth/login", response_model=TokenResponse, tags=["auth"])
 async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
-    """Выдаёт JWT в обмен на email и пароль."""
     user = await services.authenticate_user(db, data.email, data.password)
     if user is None:
-        # Намеренно не уточняем, что именно не подошло — email или пароль.
-        # Иначе по разнице ответов можно перебором выяснить, какие адреса
-        # зарегистрированы в системе.
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
             "Incorrect email or password",
@@ -120,12 +110,9 @@ async def create_order(
             db, data, user_id=current_user.id, customer_name=current_user.full_name
         )
     except CatalogUnavailable as exc:
-        # 503, а не 500: проблема временная и на нашей стороне всё исправно,
-        # клиенту имеет смысл повторить запрос позже.
         catalog_requests_total.labels(result="error").inc()
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
     except InvalidOrderItems as exc:
-        # 400: запрос сформирован неверно, повторять его бессмысленно.
         catalog_requests_total.labels(result="ok").inc()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
@@ -133,8 +120,6 @@ async def create_order(
     orders_created_total.labels(restaurant_id=str(order.restaurant_id)).inc()
     order_value.observe(float(order.total_price))
 
-    # Событие публикуется ПОСЛЕ успешного коммита: сообщать о заказе,
-    # который не сохранился, нельзя.
     await messaging.publish_order_created(order)
     return order
 
@@ -146,10 +131,6 @@ async def list_orders(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Свои заказы; админ видит все."""
-    # Фильтр по пользователю решается здесь, а не в сервисе: сервис просто
-    # умеет отдавать заказы с фильтром или без, а кто что вправе видеть —
-    # это вопрос доступа, то есть HTTP-слоя.
     user_filter = None if current_user.role is UserRole.ADMIN else current_user.id
     return await services.list_orders(db, user_id=user_filter, skip=skip, limit=limit)
 
@@ -177,7 +158,6 @@ async def change_order_status(
     db: AsyncSession = Depends(get_db),
     admin: CurrentUser = Depends(require_admin),
 ):
-    """Смена статуса заказа. Доступна администратору (кухня, диспетчер)."""
     order = await services.get_order(db, order_id)
     if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found")
@@ -186,8 +166,6 @@ async def change_order_status(
     try:
         order = await services.update_order_status(db, order_id, new_status)
     except InvalidStatusTransition as exc:
-        # 409 Conflict: запрос корректен, но противоречит текущему состоянию
-        # ресурса — например, попытка отменить уже доставленный заказ.
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
     order_status_transitions_total.labels(
@@ -203,7 +181,6 @@ async def cancel_order(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Отмена заказа самим клиентом — пока он не передан курьеру."""
     order = await services.get_order(db, order_id)
     if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found")
