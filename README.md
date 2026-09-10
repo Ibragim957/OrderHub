@@ -46,6 +46,24 @@
 цену и имя на момент покупки, даже если каталог позже изменит цену, а
 пользователь — имя.
 
+### События RabbitMQ
+
+| Событие | Публикует | Слушает | Зачем |
+|---|---|---|---|
+| `order.created` | service-1 | service-2 | подобрать свободного курьера |
+| `courier.assigned` | service-2 | service-1 | записать курьера в заказ |
+| `order.status_changed` | service-1 | service-2 | журналировать смену статуса |
+
+Курьер назначается событием, а не HTTP-запросом: клиенту не нужно ждать подбора
+курьера, чтобы оформить заказ, а если каталог недоступен, событие дождётся его
+в очереди.
+
+### Кэш Redis
+
+Кэшируется публичный список ресторанов (`GET /restaurants`): его читают чаще всего,
+а меняется он редко. Любое изменение ресторанов сбрасывает кэш. Redis — ускоритель,
+а не источник данных: если он недоступен, запросы идут напрямую в PostgreSQL.
+
 ## Запуск
 
 ```bash
@@ -59,7 +77,8 @@ docker compose up --build
 | Swagger каталога | http://localhost:8080/api/catalog/docs |
 | Swagger заказов | http://localhost:8080/api/orders/docs |
 | RabbitMQ management | http://localhost:15672 |
-| Метрики Prometheus | `/metrics` у каждого сервиса |
+| Метрики каталога | http://localhost:8080/api/catalog/metrics |
+| Метрики заказов | http://localhost:8080/api/orders/metrics |
 
 Проверка балансировки — в ответе `/health` возвращается имя инстанса:
 
@@ -78,15 +97,19 @@ for i in 1 2 3 4; do curl -s localhost:8080/api/catalog/health; echo; done
 Её назначают напрямую в базе:
 
 ```bash
-docker compose exec postgres-1 psql -U postgres -d service_1_db \n  -c "UPDATE users SET role='ADMIN' WHERE email='you@example.com'"
+docker compose exec postgres-1 psql -U postgres -d service_1_db -c "UPDATE users SET role='ADMIN' WHERE email='you@example.com'"
 ```
 
 После этого токен нужно получить заново: роль записывается в него при выдаче.
 
 ## Локальная разработка без Docker
 
+Нужен локальный PostgreSQL с созданной базой `service_2_db`. RabbitMQ и Redis
+необязательны: без них сервис работает, просто без событий и кэша.
+
 ```bash
-python -m venv .venv && .venv/Scripts/activate
+python -m venv .venv
+source .venv/bin/activate        # Windows PowerShell: .venv\Scripts\Activate.ps1
 pip install -r service-2/requirements.txt
 cd service-2 && alembic upgrade head
 uvicorn app.main:app --reload --port 8002
@@ -106,15 +129,16 @@ alembic upgrade head
 alembic downgrade -1
 ```
 
-Автогенерация не создаёт и не удаляет типы PostgreSQL `ENUM` — их приходится
-добавлять в миграцию вручную, иначе после `downgrade` остаются осиротевшие
-типы и повторный `upgrade` падает с `DuplicateObject`.
+Автогенерация создаёт типы PostgreSQL `ENUM` в `upgrade`, но не удаляет их в
+`downgrade` — удаление приходится дописывать вручную, иначе после отката остаются
+осиротевшие типы и повторный `upgrade` падает с `DuplicateObject`.
 
 ## Тесты и линтер
 
 ```bash
 ruff check service-1 service-2
-cd service-2 && pytest -v
+cd service-1 && pytest -v
+cd ../service-2 && pytest -v
 ```
 
 CI запускает то же самое при каждом push (`.github/workflows/ci.yml`):
