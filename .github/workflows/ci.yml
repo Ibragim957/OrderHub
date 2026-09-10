@@ -18,7 +18,7 @@ jobs:
           python-version: "3.13"
 
       - name: Установка ruff
-        run: pip install ruff==0.14.2
+        run: pip install ruff==0.16.6
 
       - name: Проверка стиля и ошибок
         run: ruff check service-1 service-2
@@ -71,7 +71,7 @@ jobs:
         working-directory: ${{ matrix.service }}
         run: |
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio httpx aiosqlite
+          pip install pytest==9.1.1 pytest-asyncio==1.4.0 httpx==0.28.1 aiosqlite==0.22.1
 
       - name: Запуск тестов
         working-directory: ${{ matrix.service }}
